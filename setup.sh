@@ -1,3 +1,5 @@
+#!/bin/sh
+
 #******************************************************************************
 #                *          ***                    ***
 #              ***          ***                    ***
@@ -39,6 +41,11 @@ arm9e|lpc21xx|lpc23xx|lpc31xx|lpc32xx|at91|stm32|omapl1xx|efm32| \
       bsp=$arch
       export CROSS_GCC=linux
       ;;
+   qnx)
+      bsp=$arch
+      arch=linux
+      export CROSS_GCC=linux
+      ;;
    win32)
       ;;
 
@@ -48,7 +55,9 @@ arm9e|lpc21xx|lpc23xx|lpc31xx|lpc32xx|at91|stm32|omapl1xx|efm32| \
 esac
 
 export PRJ_ROOT=`pwd`
-if [ "$arch" == "linux" ]; then
+if [ "$bsp" == "qnx" ]; then
+export GCC_PATH=${COMPILERS:-/usr/qnx650/host/qnx6/x86/usr/bin}
+elif [ "$arch" == "linux" ]; then
 export GCC_PATH=${COMPILERS:-/usr/bin}
 else
 export GCC_PATH=${COMPILERS:-/opt/rt-tools/compilers}/$CROSS_GCC
@@ -59,4 +68,4 @@ export BSP=$bsp
 # Set path for binaries
 export PATH=$GCC_PATH/bin:$PATH
 
-
+exec $SHELL -i
