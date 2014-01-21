@@ -52,6 +52,7 @@ uint16 oshw_ntohs(uint16 network)
 }
 
 /** Create list over available network adapters.
+ * @todo implement QNX for listing interfaces
  * @return First element in linked list of adapters
  */
 ec_adaptert * oshw_find_adapters(void)

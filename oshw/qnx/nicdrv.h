@@ -4,6 +4,8 @@
  * File    : nicdrv.h
  * Version : 1.3.0
  * Date    : 24-02-2013
+ *
+ * Copyright (C) 2014 OPAL-RT Technologies, Inc.
  * Copyright (C) 2005-2013 Speciaal Machinefabriek Ketels v.o.f.
  * Copyright (C) 2005-2013 Arthur Ketels
  * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven 
@@ -52,6 +54,10 @@ extern "C"
 #endif
 
 #include <pthread.h>
+
+#ifndef ETHERTYPE_ETHERCAT
+#define ETHERTYPE_ETHERCAT      0x88A4
+#endif
 
 /** pointer structure to Tx and Rx stacks */
 typedef struct
@@ -147,6 +153,17 @@ int ecx_outframe(ecx_portt *port, int idx, int sock);
 int ecx_outframe_red(ecx_portt *port, int idx);
 int ecx_waitinframe(ecx_portt *port, int idx, int timeout);
 int ecx_srconfirm(ecx_portt *port, int idx,int timeout);
+
+
+/**
+ * BPF ioctl settings structure
+ */
+struct bpf_settings {
+    int header_complete;
+    int immediate;
+    int promiscuous;
+    int buffer_len;
+};
 
 #ifdef __cplusplus
 }

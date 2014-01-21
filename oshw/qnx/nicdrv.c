@@ -76,11 +76,21 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
-#include <netpacket/packet.h>
+//#include <netpacket/packet.h> //@todo remove
 #include <pthread.h>
+#include <errno.h>
+
+#include <net/bpf.h>
+#include <net/ethertypes.h>
+#include <net/if_ether.h>
 
 #include "oshw.h"
 #include "osal.h"
+
+/** @todo remove */
+#include <stdlib.h>
+#include "utils.h"
+
 
 /** Redundancy modes */
 enum
@@ -91,6 +101,109 @@ enum
    ECT_RED_DOUBLE
 };
 
+/** BPF settings */
+struct bpf_settings settings = {
+    .header_complete = 1,
+    .immediate = 1,
+    .promiscuous = 0,
+    .buffer_len = -1,
+};
+
+/**
+ * BPF filter algorithm => drop everything but EtherCAT packages
+ * (ether.type == 0x88A4)
+ */
+struct bpf_insn insns[] = {
+    BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
+    BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETHERTYPE_ETHERCAT, 0, 1),
+    BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
+    BPF_STMT(BPF_RET+BPF_K, 0),
+};
+/**
+ * BPF program
+ */
+struct bpf_program filter = {
+    .bf_insns = insns,
+    .bf_len = (sizeof(insns) / sizeof(struct bpf_insn))
+};
+
+
+/** Open a Berkeley Packet Filter device for raw I/O
+ * The prefered low-level interface for capturing/writing network
+ * traffic on QNX or BSD is Berkeley Packet Filter (BPF)
+ *
+ * @return handler to BPF device on success; < 0 otherwise
+ */
+int open_bfp_device()
+{
+    char bpfname[16] = {"/dev/bpf\0"};
+    int bpf=-1, i=0;
+
+    /* opening autocloning BFP device */
+    bpf = open(bpfname, O_RDWR);
+
+    /* no autocloning BPF found: fall back to iteration */
+    if (bpf < 0){
+        for(i=0; i<128; i++){
+            snprintf(bpfname, sizeof(bpfname), "/dev/bpf%d", i);
+            bpf = open(bpfname, O_RDWR);
+
+            if(bpf != -1)
+                break;
+        }
+        if(bpf < 0){
+            FATAL("Error: could not open any /dev/bpf device.");
+        }
+    }
+    D("Opened BPF device \"%s\"", bpfname);
+
+    return bpf;
+}
+
+int setup_bpf_device(int bpf, const char *ifname)
+{
+    struct ifreq iface;
+    strncpy(iface.ifr_name, ifname, sizeof(ifname));
+    if( ioctl(bpf, BIOCSETIF, &iface) > 0){
+        FATAL("Could not bind %s to BPF", ifname);
+    }
+    D("Associated with \"%s\"", ifname);
+
+    /* set immediate: returns on packet arrived instead of when buffer full */
+    if( ioctl(bpf, BIOCIMMEDIATE, &settings.immediate) < 0){
+        FATAL("Could set IO immediate");
+    }
+
+    /* disable ethernet header completion by BPF */
+    if( ioctl(bpf, BIOCSHDRCMPLT , &settings.header_complete) < 0){
+        FATAL("Could get disable HDRCMPLT");
+    }
+
+    /* set promiscuous mode */
+//    if( ioctl(bpf, BIOCPROMISC, &settings.promiscuous) < 0){
+//        FATAL("Could get disable BIOCPROMISC");
+//    }
+
+//    struct bpf_version version;
+//    if( ioctl(bpf, BIOCVERSION, &version) == -1){
+//        FATAL("Could BPF version");
+//    }
+//    D("BPF version %d.%d", version.bv_major, version.bv_minor);
+
+    /* retrieve internal buffer length */
+    if( ioctl(bpf, BIOCGBLEN, &settings.buffer_len) == -1){
+        FATAL("Could get buffer length");
+    }
+    D("Buffer length is %d (%dko).", settings.buffer_len, settings.buffer_len/1024);
+
+    /* set BPF filter */
+    if( ioctl(bpf, BIOCSETF, &filter) < 0) {
+        FATAL("Could not set BPF filter (type 0x%04x): error %d (%s)", ETHERTYPE_ETHERCAT, errno, strerror(errno));
+    }
+    D("BPF filter for type 0x%04x set.", ETHERTYPE_ETHERCAT);
+
+    return 0;
+}
 
 /** Primary source MAC address used for EtherCAT.
  * This address is not the MAC address used from the NIC.

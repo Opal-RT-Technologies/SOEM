@@ -67,5 +67,3 @@ export BSP=$bsp
 
 # Set path for binaries
 export PATH=$GCC_PATH/bin:$PATH
-
-exec $SHELL -i
