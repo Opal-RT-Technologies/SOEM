@@ -54,6 +54,7 @@ extern "C"
 #endif
 
 #include <pthread.h>
+#include <sys/time.h>
 
 /** pointer structure to Tx and Rx stacks */
 typedef struct

@@ -27,6 +27,15 @@ SIZE := $(GCC_PATH)/size
 CPP :=$(CC) -E -xc -P
 OBJCOPY := $(GCC_PATH)/objcopy
 else
+ifeq ($(ARCH),qnx)
+CC := $(GCC_PATH)/gcc
+AS := $(GCC_PATH)/as
+LD := $(GCC_PATH)/ld
+AR := $(GCC_PATH)/ar
+SIZE := $(GCC_PATH)/size
+CPP :=$(CC) -E -xc -P
+OBJCOPY := $(GCC_PATH)/objcopy
+else
 CC := $(GCC_PATH)/bin/$(CROSS_GCC)-gcc
 AS := $(GCC_PATH)/bin/$(CROSS_GCC)-as
 LD := $(GCC_PATH)/bin/$(CROSS_GCC)-ld
@@ -35,6 +44,7 @@ SIZE := $(GCC_PATH)/bin/$(CROSS_GCC)-size
 CPP :=$(CC) -E -xc -P
 OBJCOPY := $(GCC_PATH)/bin/$(CROSS_GCC)-objcopy
 LDFLAGS = -nostartfiles -T"$(LD_SCRIPT)"
+endif
 endif
 
 # Host executables (TODO: move to host-specific settings)
