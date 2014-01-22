@@ -181,7 +181,7 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
    /* reset flags of NIC interface */
    r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
    /* set flags of NIC interface, here promiscuous and broadcast */
-   ifr.ifr_flags = ifr.ifr_flags || IFF_PROMISC || IFF_BROADCAST;
+   ifr.ifr_flags = ifr.ifr_flags | IFF_PROMISC | IFF_BROADCAST;
    r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
    /* bind socket to protocol, in this case RAW EtherCAT */
    sll.sll_family = AF_PACKET;
