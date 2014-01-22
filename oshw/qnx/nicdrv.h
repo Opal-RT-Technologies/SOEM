@@ -55,10 +55,6 @@ extern "C"
 
 #include <pthread.h>
 
-#ifndef ETHERTYPE_ETHERCAT
-#define ETHERTYPE_ETHERCAT      0x88A4
-#endif
-
 /** pointer structure to Tx and Rx stacks */
 typedef struct
 {
@@ -163,6 +159,7 @@ struct bpf_settings {
     int immediate;
     int promiscuous;
     int buffer_len;
+    struct timeval timeout;
 };
 
 #ifdef __cplusplus

@@ -4,6 +4,7 @@
  * File    : nicdrv.c
  * Version : 1.3.0
  * Date    : 24-02-2013
+ * Copyright (C) 2014 OPAL-RT Technologies, Inc.
  * Copyright (C) 2005-2013 Speciaal Machinefabriek Ketels v.o.f.
  * Copyright (C) 2005-2013 Arthur Ketels
  * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven 
@@ -107,6 +108,10 @@ struct bpf_settings settings = {
     .immediate = 1,
     .promiscuous = 0,
     .buffer_len = -1,
+    .timeout = {
+        .tv_sec = 0,
+        .tv_usec = 1,
+    },
 };
 
 /**
@@ -115,7 +120,7 @@ struct bpf_settings settings = {
  */
 struct bpf_insn insns[] = {
     BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
-    BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETHERTYPE_ETHERCAT, 0, 1),
+    BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETH_P_ECAT, 0, 1),
     BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
     BPF_STMT(BPF_RET+BPF_K, 0),
 };
@@ -179,6 +184,10 @@ int setup_bpf_device(int bpf, const char *ifname)
         FATAL("Could get disable HDRCMPLT");
     }
 
+    if( ioctl(bpf, BIOCSRTIMEOUT , &settings.timeout) < 0){
+        FATAL("Could set timeout");
+    }
+
     /* set promiscuous mode */
 //    if( ioctl(bpf, BIOCPROMISC, &settings.promiscuous) < 0){
 //        FATAL("Could get disable BIOCPROMISC");
@@ -198,9 +207,9 @@ int setup_bpf_device(int bpf, const char *ifname)
 
     /* set BPF filter */
     if( ioctl(bpf, BIOCSETF, &filter) < 0) {
-        FATAL("Could not set BPF filter (type 0x%04x): error %d (%s)", ETHERTYPE_ETHERCAT, errno, strerror(errno));
+        FATAL("Could not set BPF filter (type 0x%04x): error %d (%s)", ETH_P_ECAT, errno, strerror(errno));
     }
-    D("BPF filter for type 0x%04x set.", ETHERTYPE_ETHERCAT);
+    D("BPF filter for type 0x%04x set.", ETH_P_ECAT);
 
     return 0;
 }
@@ -230,10 +239,7 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
 {
    int i;
    int r, rval, ifindex;
-   struct timeval timeout;
-   struct ifreq ifr;
-   struct sockaddr_ll sll;
-   int *psock;
+   int *pbpf;
 
    rval = 0;
    if (secondary)
@@ -242,8 +248,8 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
       if (port->redport)
       {
          /* when using secondary socket it is automatically a redundant setup */
-         psock = &(port->redport->sockhandle);
-         *psock = -1;
+         pbpf = &(port->redport->sockhandle);
+         *pbpf = -1;
          port->redstate                   = ECT_RED_DOUBLE;
          port->redport->stack.sock        = &(port->redport->sockhandle);
          port->redport->stack.txbuf       = &(port->txbuf);
@@ -274,33 +280,14 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
       port->stack.rxbuf       = &(port->rxbuf);
       port->stack.rxbufstat   = &(port->rxbufstat);
       port->stack.rxsa        = &(port->rxsa);
-      psock = &(port->sockhandle);
+      pbpf = &(port->sockhandle);
    }   
-   /* we use RAW packet socket, with packet type ETH_P_ECAT */
-   *psock = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ECAT));
+   /* we use BPF capture device, with filter on ethertype ETH_P_ECAT */
+   *pbpf = open_bfp_device();
+
+   /* bind with ifname, set flags, set filter to ETH_P_ECAT */
+   r = setup_bpf_device(*pbpf, ifname);
    
-   timeout.tv_sec =  0;
-   timeout.tv_usec = 1; 
-   r = setsockopt(*psock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-   r = setsockopt(*psock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-   i = 1;
-   r = setsockopt(*psock, SOL_SOCKET, SO_DONTROUTE, &i, sizeof(i));
-   /* connect socket to NIC by name */
-   strcpy(ifr.ifr_name, ifname);
-   r = ioctl(*psock, SIOCGIFINDEX, &ifr);
-   ifindex = ifr.ifr_ifindex;
-   strcpy(ifr.ifr_name, ifname);
-   ifr.ifr_flags = 0;
-   /* reset flags of NIC interface */
-   r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
-   /* set flags of NIC interface, here promiscuous and broadcast */
-   ifr.ifr_flags = ifr.ifr_flags || IFF_PROMISC || IFF_BROADCAST;
-   r = ioctl(*psock, SIOCGIFFLAGS, &ifr);
-   /* bind socket to protocol, in this case RAW EtherCAT */
-   sll.sll_family = AF_PACKET;
-   sll.sll_ifindex = ifindex;
-   sll.sll_protocol = htons(ETH_P_ECAT);
-   r = bind(*psock, (struct sockaddr *)&sll, sizeof(sll));
    /* setup ethernet headers in tx buffers so we don't have to repeat it */
    for (i = 0; i < EC_MAXBUF; i++) 
    {
@@ -329,7 +316,7 @@ int ecx_closenic(ecx_portt *port)
 
 /** Fill buffer with ethernet header structure.
  * Destination MAC is allways broadcast.
- * Ethertype is allways ETH_P_ECAT.
+ * Ethertype is always ETH_P_ECAT.
  * @param[out] p = buffer
  */
 void ec_setupheader(void *p) 
