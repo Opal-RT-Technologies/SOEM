@@ -160,13 +160,19 @@ int open_bfp_device()
             FATAL("Error: could not open any /dev/bpf device.");
         }
     }
-    D("Opened BPF device \"%s\"", bpfname);
+    D("Opened BPF device \"%s\" on %d", bpfname, bpf);
 
     return bpf;
 }
 
 int setup_bpf_device(int bpf, const char *ifname)
 {
+    /* set internal buffer length */
+    int buflen = EC_BUFSIZE;
+    if( ioctl(bpf, BIOCSBLEN, &buflen) == -1){
+        FATAL("Could set buffer length to %d: error %d (%s)", buflen, errno, strerror(errno));
+    }
+
     struct ifreq iface;
     strncpy(iface.ifr_name, ifname, sizeof(ifname));
     if( ioctl(bpf, BIOCSETIF, &iface) > 0){
@@ -211,6 +217,7 @@ int setup_bpf_device(int bpf, const char *ifname)
     }
     D("BPF filter for type 0x%04x set.", ETH_P_ECAT);
 
+    sleep(1);
     return 0;
 }
 
@@ -453,6 +460,11 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
    int lp, bytesrx;
    ec_stackT *stack;
 
+   struct bpf_hdr *packet;
+   ec_etherheadert *ether;
+   unsigned char bpfbuffer[EC_MAXECATFRAME];
+   memset(bpfbuffer, 0, sizeof(bpfbuffer));
+
    if (!stacknumber)
    {
       stack = &(port->stack);
@@ -462,10 +474,46 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
       stack = &(port->redport->stack);
    }
    lp = sizeof(port->tempinbuf);
-   bytesrx = read(*stack->sock, (*stack->tempbuf), lp);
-   port->tempinbufs = bytesrx;
-   
-   return (bytesrx > 0);
+//   bytesrx = read(*stack->sock, , lp);
+   bytesrx = read(*stack->sock, bpfbuffer, EC_MAXECATFRAME);
+
+   packet = &bpfbuffer;
+
+   if(bytesrx < 0 ){
+       D("Err reading %d: %d (%s)", *stack->sock, errno, strerror(errno));
+   }else{
+//       D("Read: %d (hdr:%d, cap: %d) on %u:%u", bytesrx, packet->bh_hdrlen, packet->bh_caplen, packet->bh_tstamp.tv_sec, packet->bh_tstamp.tv_usec);
+       memcpy((*stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
+
+       ether = (*stack->tempbuf);
+       int i=0;
+       printf(COLOR_CLEAR"\n**RAW**" COLOR_RED);
+       for(i=0; i<bytesrx; i++){
+           // cr
+           if(i%16 == 0)
+                printf("\n");
+           if(i == packet->bh_hdrlen)
+                printf(COLOR_CLEAR "" COLOR_BLUE);
+
+           printf("%02x.", bpfbuffer[i]);
+
+       }
+       printf(COLOR_GREEN" [buf: %d, hdr: %d, cap: %d]\n", bytesrx, packet->bh_hdrlen, packet->bh_caplen);
+
+        /* */
+       printf(COLOR_CLEAR"**PACKET**"COLOR_BLUE);
+       for(i=0; i<packet->bh_caplen; i++){
+           // cr
+           if(i%16 == 0)
+                printf("\n");
+           printf("%02x.", ((unsigned char *)(*stack->tempbuf))[i]);
+       }
+       printf(COLOR_GREEN" [%d]", packet->bh_caplen);
+       printf(COLOR_CLEAR"\n\n");
+
+   }
+   port->tempinbufs = bytesrx-packet->bh_hdrlen;
+       return (bytesrx > 0);
 }
 
 /** Non blocking receive frame function. Uses RX buffer and index to combine
@@ -524,12 +572,15 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
          /* check if it is an EtherCAT frame */
          if (ehp->etype == htons(ETH_P_ECAT)) 
          {
+            D("Ethertype OK");
+
             ecp =(ec_comt*)(&(*stack->tempbuf)[ETH_HEADERSIZE]); 
             l = etohs(ecp->elength) & 0x0fff;
             idxf = ecp->index;
             /* found index equals reqested index ? */
             if (idxf == idx) 
             {
+                D("Msg id %d correct.", idx);
                /* yes, put it in the buffer array (strip ethernet header) */
                memcpy(rxbuf, &(*stack->tempbuf)[ETH_HEADERSIZE], (*stack->txbuflength)[idx] - ETH_HEADERSIZE);
                /* return WKC */
@@ -550,12 +601,16 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
                   /* mark as received */
                   (*stack->rxbufstat)[idxf] = EC_BUF_RCVD;
                   (*stack->rxsa)[idxf] = ntohs(ehp->sa1);
+                  D("Msg id %d delayed.", idx);
                }
                else 
                {
                   /* strange things happend */
+                   D("Msg id %d not found at all", idx);
                }
             }
+         }else{
+             D("Incorrect ethertype!");
          }
       }
       pthread_mutex_unlock( &(port->rx_mutex) );
@@ -647,7 +702,7 @@ static int ecx_waitinframe_red(ecx_portt *port, int idx, osal_timert *timer)
             memcpy(&(port->rxbuf[idx]), &(port->redport->rxbuf[idx]), port->txbuflength[idx] - ETH_HEADERSIZE);
             wkc = wkc2;
          }   
-      }      
+      }
    }
    
    /* return WKC or EC_NOFRAME */

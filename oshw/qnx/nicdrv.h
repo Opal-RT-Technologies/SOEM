@@ -163,6 +163,9 @@ struct bpf_settings {
     struct timeval timeout;
 };
 
+/* @todo make larger buffer for BPF device (EC_BUFSIZE+BPFHDRSIZE)*MAXBUF */
+//typedef uint8 ec_bpfbufT[EC_BUFSIZE];
+
 #ifdef __cplusplus
 }
 #endif
