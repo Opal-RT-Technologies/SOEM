@@ -462,7 +462,6 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
    ec_stackT *stack;
 
    struct bpf_hdr *packet;
-   ec_etherheadert *ether;
    unsigned char bpfbuffer[EC_MAXECATFRAME];
    memset(bpfbuffer, 0, sizeof(bpfbuffer));
 
@@ -475,67 +474,32 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
       stack = &(port->redport->stack);
    }
    lp = sizeof(port->tempinbuf);
-//   bytesrx = read(*stack->sock, , lp);
-   bytesrx = read(*stack->sock, bpfbuffer, EC_MAXECATFRAME);
 
+   bytesrx = read(*stack->sock, bpfbuffer, EC_MAXECATFRAME);
    packet = &bpfbuffer;
 
    if(bytesrx < 0 ){
        D("Err reading %d: %d (%s)", *stack->sock, errno, strerror(errno));
    }else{
-//       D("Read: %d (hdr:%d, cap: %d) on %u:%u", bytesrx, packet->bh_hdrlen, packet->bh_caplen, packet->bh_tstamp.tv_sec, packet->bh_tstamp.tv_usec);
-       memcpy((stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
-
-       ether = (ec_etherheadert *)(stack->tempbuf);
-       if(ether->sa0 == 0x0101){
+       /** QNX's BPF does not implement BIOCSDIRECTION
+        * we have to drop outgoing messages ourself
+        * @todo find a way to filter on BPF level to reduce the amount
+        *   of messages copied to userspace
+        */
+       uint16 *sa0 = (bpfbuffer + packet->bh_hdrlen + 3*sizeof(uint16));
+       if( *sa0 == priMAC[0] || *sa0 == secMAC[0] ) {
+            /* drop */
            return 0;
        }
-       int i=0;
-#if 0
-       printf(COLOR_CLEAR"\n**RAW**" COLOR_RED);
-       for(i=0; i<bytesrx; i++){
-           // cr
-           if(i%16 == 0)
-                printf("\n");
-           if(i == packet->bh_hdrlen)
-                printf(COLOR_CLEAR "" COLOR_BLUE);
 
-           printf("%02x.", bpfbuffer[i]);
-
-       }
-       printf(COLOR_GREEN" [buf: %d, hdr: %d, cap: %d]\n", bytesrx, packet->bh_hdrlen, packet->bh_caplen);
-
-        /* */
-       printf(COLOR_CLEAR"**PACKET**"COLOR_BLUE);
-       for(i=0; i<packet->bh_caplen; i++){
-           // cr
-           if(i%16 == 0)
-                printf("\n");
-           if(i == 12)
-               printf(COLOR_GREEN);
-           if(i == 14)
-               printf(COLOR_YELLOW);
-           if(i == 16)
-               printf(COLOR_BLUE);
-           if(i == 17)
-               printf(COLOR_RED);
-           if(i == 18)
-               printf(COLOR_YELLOW);
-           if(i == 19)
-               printf(COLOR_BLUE);
-
-           printf("%02x.", ((unsigned char *)(*stack->tempbuf))[i]);
-       }
-       printf(COLOR_GREEN" [%d]", packet->bh_caplen);
-       printf(COLOR_CLEAR"\n\n");
-#endif
-       print_ecat_msg((stack->tempbuf), packet->bh_caplen);
+       /** BPF writes its header first, we cannot pass the pointer to the real buffer */
+       memcpy((stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
+//       print_ecat_msg((stack->tempbuf), packet->bh_caplen);
 
    }
    port->tempinbufs = packet->bh_caplen;
 
-//   D("Received: %d", port->tempinbufs);
-       return (bytesrx > 0);
+   return (bytesrx > 0);
 }
 
 /** Non blocking receive frame function. Uses RX buffer and index to combine

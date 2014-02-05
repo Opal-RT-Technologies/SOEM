@@ -63,7 +63,6 @@
 
 static void print_ecat_msg(void *msg, int len)
 {
-    return;
     char *data8 = (uint8 *)msg;
     char *data16 = (uint16 *)msg;
 
