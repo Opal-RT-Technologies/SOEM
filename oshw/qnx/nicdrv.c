@@ -106,7 +106,7 @@ enum
 struct bpf_settings settings = {
     .header_complete = 1,
     .immediate = 1,
-    .promiscuous = 0,
+    .promiscuous = 1,
     .buffer_len = -1,
     .timeout = {
         .tv_sec = 0,
@@ -217,7 +217,6 @@ int setup_bpf_device(int bpf, const char *ifname)
     }
     D("BPF filter for type 0x%04x set.", ETH_P_ECAT);
 
-    sleep(1);
     return 0;
 }
 
@@ -394,6 +393,7 @@ void ecx_setbufstat(ecx_portt *port, int idx, int bufstat)
  * @param[in] idx         = index in tx buffer array
  * @param[in] stacknumber  = 0=Primary 1=Secondary stack
  * @return socket send result
+ *
  */
 int ecx_outframe(ecx_portt *port, int idx, int stacknumber)
 {
@@ -411,6 +411,7 @@ int ecx_outframe(ecx_portt *port, int idx, int stacknumber)
    lp = (*stack->txbuflength)[idx];
    rval = write(*stack->sock, (*stack->txbuf)[idx], lp);
    (*stack->rxbufstat)[idx] = EC_BUF_TX;
+//   D("Transmitted: %d (size: %d, id: %d)", rval, lp, idx);
    
    return rval;
 }
@@ -483,10 +484,14 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
        D("Err reading %d: %d (%s)", *stack->sock, errno, strerror(errno));
    }else{
 //       D("Read: %d (hdr:%d, cap: %d) on %u:%u", bytesrx, packet->bh_hdrlen, packet->bh_caplen, packet->bh_tstamp.tv_sec, packet->bh_tstamp.tv_usec);
-       memcpy((*stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
+       memcpy((stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
 
-       ether = (*stack->tempbuf);
+       ether = (ec_etherheadert *)(stack->tempbuf);
+       if(ether->sa0 == 0x0101){
+           return 0;
+       }
        int i=0;
+#if 0
        printf(COLOR_CLEAR"\n**RAW**" COLOR_RED);
        for(i=0; i<bytesrx; i++){
            // cr
@@ -506,13 +511,30 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
            // cr
            if(i%16 == 0)
                 printf("\n");
+           if(i == 12)
+               printf(COLOR_GREEN);
+           if(i == 14)
+               printf(COLOR_YELLOW);
+           if(i == 16)
+               printf(COLOR_BLUE);
+           if(i == 17)
+               printf(COLOR_RED);
+           if(i == 18)
+               printf(COLOR_YELLOW);
+           if(i == 19)
+               printf(COLOR_BLUE);
+
            printf("%02x.", ((unsigned char *)(*stack->tempbuf))[i]);
        }
        printf(COLOR_GREEN" [%d]", packet->bh_caplen);
        printf(COLOR_CLEAR"\n\n");
+#endif
+       print_ecat_msg((stack->tempbuf), packet->bh_caplen);
 
    }
-   port->tempinbufs = bytesrx-packet->bh_hdrlen;
+   port->tempinbufs = packet->bh_caplen;
+
+//   D("Received: %d", port->tempinbufs);
        return (bytesrx > 0);
 }
 
@@ -572,15 +594,15 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
          /* check if it is an EtherCAT frame */
          if (ehp->etype == htons(ETH_P_ECAT)) 
          {
-            D("Ethertype OK");
-
             ecp =(ec_comt*)(&(*stack->tempbuf)[ETH_HEADERSIZE]); 
             l = etohs(ecp->elength) & 0x0fff;
             idxf = ecp->index;
+
+//            D("Received: %d (id: %d)", (*stack->txbuflength)[idx], idxf);
             /* found index equals reqested index ? */
             if (idxf == idx) 
             {
-                D("Msg id %d correct.", idx);
+//                D("Msg id %d correct.", idx);
                /* yes, put it in the buffer array (strip ethernet header) */
                memcpy(rxbuf, &(*stack->tempbuf)[ETH_HEADERSIZE], (*stack->txbuflength)[idx] - ETH_HEADERSIZE);
                /* return WKC */
@@ -589,6 +611,8 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
                (*stack->rxbufstat)[idx] = EC_BUF_COMPLETE;
                /* store MAC source word 1 for redundant routing info */
                (*stack->rxsa)[idx] = ntohs(ehp->sa1);
+
+//               D("  wkc: %d, from: %d", rval, (*stack->rxsa)[idx]);
             }
             else 
             {
@@ -601,6 +625,7 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
                   /* mark as received */
                   (*stack->rxbufstat)[idxf] = EC_BUF_RCVD;
                   (*stack->rxsa)[idxf] = ntohs(ehp->sa1);
+
                   D("Msg id %d delayed.", idx);
                }
                else 
