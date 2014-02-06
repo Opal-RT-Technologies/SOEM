@@ -2,7 +2,7 @@
  * Simple Open EtherCAT Master Library 
  *
  * File    : ethercatcoe.c
- * Version : 1.3.0
+ * Version : 1.3.1
  * Date    : 24-02-2013
  * Copyright (C) 2005-2013 Speciaal Machinefabriek Ketels v.o.f.
  * Copyright (C) 2005-2013 Arthur Ketels

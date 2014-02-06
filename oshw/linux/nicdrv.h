@@ -2,8 +2,8 @@
  * Simple Open EtherCAT Master Library 
  *
  * File    : nicdrv.h
- * Version : 1.3.0
- * Date    : 24-02-2013
+ * Version : 1.3.1
+ * Date    : 06-02-2014
  * Copyright (C) 2005-2013 Speciaal Machinefabriek Ketels v.o.f.
  * Copyright (C) 2005-2013 Arthur Ketels
  * Copyright (C) 2008-2009 TU/e Technische Universiteit Eindhoven 

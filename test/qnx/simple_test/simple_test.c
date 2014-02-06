@@ -103,7 +103,7 @@ void simpletest(char *ifname)
                     if(wkc >= expectedWKC)
                     {
                         printf("Processdata cycle %4d, WKC %d , O:", i, wkc);
-
+                        *ec_slave[0].outputs = (i%256);
                         for(j = 0 ; j < oloop; j++)
                         {
                             printf(" %2.2x", *(ec_slave[0].outputs + j));

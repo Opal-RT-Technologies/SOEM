@@ -622,7 +622,15 @@ void slaveinfo(char *ifname)
 int main(int argc, char *argv[])
 {
    printf("SOEM (Simple Open EtherCAT Master)\nSlaveinfo\n");
-   
+
+   ec_adaptert *adp = ec_find_adapters();
+   ec_adaptert *iface = adp;
+   while(iface){
+        printf(".. %s; %s\n", iface->name, iface->desc);
+       iface = iface->next;
+   }
+   ec_free_adapters(adp);
+
    if (argc > 1)
    {      
       if ((argc > 2) && (strncmp(argv[2], "-sdo", sizeof("-sdo")) == 0)) printSDO = TRUE;

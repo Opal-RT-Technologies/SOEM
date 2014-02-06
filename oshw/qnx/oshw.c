@@ -12,6 +12,7 @@
  *                           t h e  r e a l t i m e  t a r g e t  e x p e r t s
  *
  * http://www.rt-labs.com
+ * Copyright (C) 2014. OPAL-RT Technologies, Inc.
  * Copyright (C) 2009. rt-labs AB, Sweden. All rights reserved.
  *------------------------------------------------------------------------------
  * $Id: oshw.c 282 2012-09-25 10:52:42Z rtlaka $

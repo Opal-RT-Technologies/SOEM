@@ -2,7 +2,7 @@
  * Simple Open EtherCAT Master Library 
  *
  * File    : nicdrv.h
- * Version : 1.3.0
+ * Version : 1.3.1
  * Date    : 24-02-2013
  *
  * Copyright (C) 2014 OPAL-RT Technologies, Inc.
