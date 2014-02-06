@@ -118,12 +118,32 @@ struct bpf_settings settings = {
  * BPF filter algorithm => drop everything but EtherCAT packages
  * (ether.type == 0x88A4)
  */
-struct bpf_insn insns[] = {
-    BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
-    BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETH_P_ECAT, 0, 1),
-    BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
-    BPF_STMT(BPF_RET+BPF_K, 0),
-};
+#if defined(BIOCSDIRECTION)
+    struct bpf_insn insns[] = {
+        /* store Ethertype from offset 12 */
+        BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
+        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETH_P_ECAT, 0, 1),
+        BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
+        BPF_STMT(BPF_RET+BPF_K, 0),
+    };
+#else
+    /** capture direction not supported by this version of BPF
+     * we fall back to filtering the source address
+     * @warning if EtherCAT packet are returned without source mac
+     *  modification, it will fail (no msg will be captured)
+     */
+    struct bpf_insn insns[] = {
+        BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 12),
+        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, ETH_P_ECAT, 0, 4),
+        /* let's look at the source MAC address */
+        BPF_STMT(BPF_LD+BPF_H+BPF_ABS, 6),
+        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, PRIMAC0, 2, 0),  /* primary iface addr */
+        BPF_JUMP(BPF_JMP+BPF_JEQ+BPF_K, SECMAC0, 1, 0),  /* secondary iface addr */
+        BPF_STMT(BPF_RET+BPF_K, (u_int)-1),
+        BPF_STMT(BPF_RET+BPF_K, 0),
+    };
+#endif
+
 /**
  * BPF program
  */
@@ -193,7 +213,12 @@ int setup_bpf_device(int bpf, const char *ifname)
     if( ioctl(bpf, BIOCSRTIMEOUT , &settings.timeout) < 0){
         FATAL("Could set timeout");
     }
-
+#if defined(BIOCSDIRECTION)
+    int direction = PBF_D_OUT;
+    if( ioctl(bpf, BIOCSDIRECTION , &direction) < 0){
+        FATAL("Could set direction");
+    }
+#endif
     /* set promiscuous mode */
 //    if( ioctl(bpf, BIOCPROMISC, &settings.promiscuous) < 0){
 //        FATAL("Could get disable BIOCPROMISC");
@@ -226,9 +251,9 @@ int setup_bpf_device(int bpf, const char *ifname)
  * differentiate the route the packet traverses through the EtherCAT
  * segment. This is needed to find out the packet flow in redundant
  * configurations. */
-const uint16 priMAC[3] = { 0x0101, 0x0101, 0x0101 };
+const uint16 priMAC[3] = { PRIMAC0, PRIMAC1, PRIMAC2 };
 /** Secondary source MAC address used for EtherCAT. */
-const uint16 secMAC[3] = { 0x0404, 0x0404, 0x0404 };
+const uint16 secMAC[3] = { SECMAC0, SECMAC1, SECMAC2 };
 
 /** second MAC word is used for identification */
 #define RX_PRIM priMAC[1]
@@ -287,7 +312,7 @@ int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary)
       port->stack.rxbufstat   = &(port->rxbufstat);
       port->stack.rxsa        = &(port->rxsa);
       pbpf = &(port->sockhandle);
-   }   
+   }
    /* we use BPF capture device, with filter on ethertype ETH_P_ECAT */
    *pbpf = open_bfp_device();
 
@@ -481,6 +506,8 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
    if(bytesrx < 0 ){
        D("Err reading %d: %d (%s)", *stack->sock, errno, strerror(errno));
    }else{
+   /// @todo remote
+#if 0
        /** QNX's BPF does not implement BIOCSDIRECTION
         * we have to drop outgoing messages ourself
         * @todo find a way to filter on BPF level to reduce the amount
@@ -488,10 +515,11 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
         */
        uint16 *sa0 = (bpfbuffer + packet->bh_hdrlen + 3*sizeof(uint16));
        if( *sa0 == priMAC[0] || *sa0 == secMAC[0] ) {
+           print_ecat_msg((stack->tempbuf), packet->bh_caplen);
             /* drop */
            return 0;
        }
-
+#endif
        /** BPF writes its header first, we cannot pass the pointer to the real buffer */
        memcpy((stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
 //       print_ecat_msg((stack->tempbuf), packet->bh_caplen);
@@ -739,7 +767,7 @@ int ecx_srconfirm(ecx_portt *port, int idx, int timeout)
    osal_timert timer1, timer2;
 
    osal_timer_start (&timer1, timeout);
-   do 
+   do
    {
       /* tx frame on primary and if in redundant mode a dummy on secondary */
       ecx_outframe_red(port, idx);
@@ -754,7 +782,7 @@ int ecx_srconfirm(ecx_portt *port, int idx, int timeout)
       }
       /* get frame from primary or if in redundant mode possibly from secondary */
       wkc = ecx_waitinframe_red(port, idx, &timer2);
-   /* wait for answer with WKC>=0 or otherwise retry until timeout */   
+   /* wait for answer with WKC>=0 or otherwise retry until timeout */
    } while ((wkc <= EC_NOFRAME) && !osal_timer_is_expired (&timer1));
    /* if nothing received, clear buffer index status so it can be used again */
    if (wkc <= EC_NOFRAME) 

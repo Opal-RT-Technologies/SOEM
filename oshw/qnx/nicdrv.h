@@ -124,6 +124,15 @@ typedef struct
    pthread_mutex_t rx_mutex;
 } ecx_portt;
 
+/* MAC addresses must be available at preproc time to
+ * compile the BPF filter
+ */
+#define PRIMAC0 0x0101
+#define PRIMAC1 0x0101
+#define PRIMAC2 0x0101
+#define SECMAC0 0x0404
+#define SECMAC1 0x0404
+#define SECMAC2 0x0404
 extern const uint16 priMAC[3];
 extern const uint16 secMAC[3];
 
