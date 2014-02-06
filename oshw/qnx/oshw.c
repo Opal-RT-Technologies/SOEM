@@ -72,6 +72,11 @@ ec_adaptert * oshw_find_adapters(void)
    ids = if_nameindex ();
    for(i = 0; ids[i].if_index != 0; i++)
    {
+      /* check for duplicates */
+      if(i && ids[i].if_index == ids[i-1].if_index){
+         continue;
+      }
+
       adapter = (ec_adaptert *)malloc(sizeof(ec_adaptert));
       /* If we got more than one adapter save link list pointer to previous
        * adapter.

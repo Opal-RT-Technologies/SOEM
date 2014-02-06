@@ -27,6 +27,10 @@ ifeq ($(ARCH),linux)
 LIBS += -lpthread -lrt
 endif
 
+ifeq ($(ARCH),qnx)
+LIBS += -lsocket
+endif
+
 SUBDIRS = $(patsubst %/,%,$(dir $(wildcard */Makefile)))
 
 # Use .PHONY so link step always occurs. This is a simple way
