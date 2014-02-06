@@ -68,7 +68,6 @@
 
 #include <sys/types.h>
 #include <sys/ioctl.h>
-#include <net/if.h> 
 #include <sys/socket.h> 
 #include <unistd.h>
 #include <sys/time.h> 
@@ -77,8 +76,6 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
-//#include <netpacket/packet.h> //@todo remove
-#include <pthread.h>
 #include <errno.h>
 
 #include <net/bpf.h>
@@ -88,10 +85,14 @@
 #include "oshw.h"
 #include "osal.h"
 
-/** @todo remove */
-#include <stdlib.h>
-#include "utils.h"
 
+// define if debug printf is needed
+//#define EC_DEBUG
+#ifdef EC_DEBUG
+#define EC_PRINT printf
+#else
+#define EC_PRINT(...) do {} while (0)
+#endif
 
 /** Redundancy modes */
 enum
@@ -177,10 +178,10 @@ int open_bfp_device()
                 break;
         }
         if(bpf < 0){
-            FATAL("Error: could not open any /dev/bpf device.");
+            EC_PRINT("Error: could not open any /dev/bpf device.");
         }
     }
-    D("Opened BPF device \"%s\" on %d", bpfname, bpf);
+    EC_PRINT("Opened BPF device \"%s\" on %d\n", bpfname, bpf);
 
     return bpf;
 }
@@ -190,57 +191,47 @@ int setup_bpf_device(int bpf, const char *ifname)
     /* set internal buffer length */
     int buflen = EC_BUFSIZE;
     if( ioctl(bpf, BIOCSBLEN, &buflen) == -1){
-        FATAL("Could set buffer length to %d: error %d (%s)", buflen, errno, strerror(errno));
+        EC_PRINT("Error: Could set buffer length to %d: error %d (%s)", buflen, errno, strerror(errno));
     }
 
     struct ifreq iface;
     strncpy(iface.ifr_name, ifname, sizeof(ifname));
     if( ioctl(bpf, BIOCSETIF, &iface) > 0){
-        FATAL("Could not bind %s to BPF", ifname);
+        EC_PRINT("Error: Could not bind %s to BPF", ifname);
     }
-    D("Associated with \"%s\"", ifname);
+    EC_PRINT("Associated with \"%s\"\n", ifname);
 
     /* set immediate: returns on packet arrived instead of when buffer full */
     if( ioctl(bpf, BIOCIMMEDIATE, &settings.immediate) < 0){
-        FATAL("Could set IO immediate");
+        EC_PRINT("Error: Could set IO immediate");
     }
 
     /* disable ethernet header completion by BPF */
     if( ioctl(bpf, BIOCSHDRCMPLT , &settings.header_complete) < 0){
-        FATAL("Could get disable HDRCMPLT");
+        EC_PRINT("Error: Could get disable HDRCMPLT");
     }
 
     if( ioctl(bpf, BIOCSRTIMEOUT , &settings.timeout) < 0){
-        FATAL("Could set timeout");
+        EC_PRINT("Error: Could set timeout");
     }
 #if defined(BIOCSDIRECTION)
     int direction = PBF_D_OUT;
     if( ioctl(bpf, BIOCSDIRECTION , &direction) < 0){
-        FATAL("Could set direction");
+        EC_PRINT("Error: Could set direction");
     }
 #endif
-    /* set promiscuous mode */
-//    if( ioctl(bpf, BIOCPROMISC, &settings.promiscuous) < 0){
-//        FATAL("Could get disable BIOCPROMISC");
-//    }
-
-//    struct bpf_version version;
-//    if( ioctl(bpf, BIOCVERSION, &version) == -1){
-//        FATAL("Could BPF version");
-//    }
-//    D("BPF version %d.%d", version.bv_major, version.bv_minor);
 
     /* retrieve internal buffer length */
     if( ioctl(bpf, BIOCGBLEN, &settings.buffer_len) == -1){
-        FATAL("Could get buffer length");
+        EC_PRINT("Error: Could get buffer length");
     }
-    D("Buffer length is %d (%dko).", settings.buffer_len, settings.buffer_len/1024);
+    EC_PRINT("Buffer length is %d (%dko).\n", settings.buffer_len, settings.buffer_len/1024);
 
     /* set BPF filter */
     if( ioctl(bpf, BIOCSETF, &filter) < 0) {
-        FATAL("Could not set BPF filter (type 0x%04x): error %d (%s)", ETH_P_ECAT, errno, strerror(errno));
+        EC_PRINT("Error: Could not set BPF filter (type 0x%04x): error %d (%s)", ETH_P_ECAT, errno, strerror(errno));
     }
-    D("BPF filter for type 0x%04x set.", ETH_P_ECAT);
+    EC_PRINT("BPF filter for type 0x%04x set.\n", ETH_P_ECAT);
 
     return 0;
 }
@@ -269,7 +260,7 @@ const uint16 secMAC[3] = { SECMAC0, SECMAC1, SECMAC2 };
 int ecx_setupnic(ecx_portt *port, const char *ifname, int secondary) 
 {
    int i;
-   int r, rval, ifindex;
+   int r, rval;
    int *pbpf;
 
    rval = 0;
@@ -436,8 +427,7 @@ int ecx_outframe(ecx_portt *port, int idx, int stacknumber)
    lp = (*stack->txbuflength)[idx];
    rval = write(*stack->sock, (*stack->txbuf)[idx], lp);
    (*stack->rxbufstat)[idx] = EC_BUF_TX;
-//   D("Transmitted: %d (size: %d, id: %d)", rval, lp, idx);
-   
+
    return rval;
 }
 
@@ -501,29 +491,13 @@ static int ecx_recvpkt(ecx_portt *port, int stacknumber)
    lp = sizeof(port->tempinbuf);
 
    bytesrx = read(*stack->sock, bpfbuffer, EC_MAXECATFRAME);
-   packet = &bpfbuffer;
+   packet = (struct bpf_hdr *)&bpfbuffer;
 
    if(bytesrx < 0 ){
-       D("Err reading %d: %d (%s)", *stack->sock, errno, strerror(errno));
+       EC_PRINT("Err reading %d: %d (%s)\n", *stack->sock, errno, strerror(errno));
    }else{
-   /// @todo remote
-#if 0
-       /** QNX's BPF does not implement BIOCSDIRECTION
-        * we have to drop outgoing messages ourself
-        * @todo find a way to filter on BPF level to reduce the amount
-        *   of messages copied to userspace
-        */
-       uint16 *sa0 = (bpfbuffer + packet->bh_hdrlen + 3*sizeof(uint16));
-       if( *sa0 == priMAC[0] || *sa0 == secMAC[0] ) {
-           print_ecat_msg((stack->tempbuf), packet->bh_caplen);
-            /* drop */
-           return 0;
-       }
-#endif
        /** BPF writes its header first, we cannot pass the pointer to the real buffer */
        memcpy((stack->tempbuf), bpfbuffer + packet->bh_hdrlen, packet->bh_caplen);
-//       print_ecat_msg((stack->tempbuf), packet->bh_caplen);
-
    }
    port->tempinbufs = packet->bh_caplen;
 
@@ -590,11 +564,9 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
             l = etohs(ecp->elength) & 0x0fff;
             idxf = ecp->index;
 
-//            D("Received: %d (id: %d)", (*stack->txbuflength)[idx], idxf);
             /* found index equals reqested index ? */
             if (idxf == idx) 
             {
-//                D("Msg id %d correct.", idx);
                /* yes, put it in the buffer array (strip ethernet header) */
                memcpy(rxbuf, &(*stack->tempbuf)[ETH_HEADERSIZE], (*stack->txbuflength)[idx] - ETH_HEADERSIZE);
                /* return WKC */
@@ -603,8 +575,6 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
                (*stack->rxbufstat)[idx] = EC_BUF_COMPLETE;
                /* store MAC source word 1 for redundant routing info */
                (*stack->rxsa)[idx] = ntohs(ehp->sa1);
-
-//               D("  wkc: %d, from: %d", rval, (*stack->rxsa)[idx]);
             }
             else 
             {
@@ -618,16 +588,16 @@ int ecx_inframe(ecx_portt *port, int idx, int stacknumber)
                   (*stack->rxbufstat)[idxf] = EC_BUF_RCVD;
                   (*stack->rxsa)[idxf] = ntohs(ehp->sa1);
 
-                  D("Msg id %d delayed.", idx);
+//                  EC_PRINT("Msg id %d delayed.\n", idx);
                }
                else 
                {
                   /* strange things happend */
-                   D("Msg id %d not found at all", idx);
+                   EC_PRINT("Msg id %d not found at all.\n", idx);
                }
             }
          }else{
-             D("Incorrect ethertype!");
+             EC_PRINT("Incorrect ethertype!\n");
          }
       }
       pthread_mutex_unlock( &(port->rx_mutex) );
